@@ -1,0 +1,28 @@
+Windows-OS : installateur pour NumWorks n0120 (PC Windows)
+==========================================================
+
+1. Une seule fois : installe Python 3 depuis https://www.python.org/downloads/
+   et coche « Add python.exe to PATH » pendant l installation.
+   Aucun pilote à installer : Windows reconnaît la calculatrice tout seul.
+
+2. Décompresse le dossier, puis double-clique sur « Installer Windows-OS.bat ».
+   (Si Windows affiche « Windows a protégé votre ordinateur » :
+   Informations complémentaires > Exécuter quand même.)
+   La première fois, il installe libusb pour Python, puis la page de
+   l installateur s ouvre dans ton navigateur.
+
+3. Branche la calculatrice en USB et appuie sur Reset au dos :
+   elle redémarre sur le système officiel (slot A).
+
+4. Quand le voyant passe au vert, clique sur « Installer Windows-OS ».
+
+Les jeux déjà dans le dossier games\ sont prêts à installer. Pour ajouter
+d autres jeux .nwa depuis Windows, installe aussi la chaîne ARM
+(Arm GNU Toolchain, « arm-none-eabi », sur developer.arm.com), ou ajoute-les
+dans le dossier games/ de ta copie privée sur GitHub et relance la compilation.
+
+Ne ferme pas la fenêtre noire pendant l installation.
+
+Windows-OS s installe dans le slot B : le système officiel (slot A) n est
+jamais modifié. Après un Reset, la calculatrice revient sur le système
+officiel ; il suffit de relancer l installation pour retrouver Windows-OS.

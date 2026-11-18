@@ -1,0 +1,75 @@
+# Builds YOUR Windows-OS (a Windows 11 style desktop for the NumWorks n0120)
+# with its one-click installers for Mac and for Windows.
+#
+# It only runs in a PRIVATE copy of this repository ("Use this template" ->
+# Private). The firmware is compiled from NumWorks' own sources for you, in
+# your account; it must not end up downloadable by everyone, which is what a
+# public repository would do with it.
+#
+# Games: put .nwa files in the games/ folder of your private copy, they are
+# pre-linked for slot B and shipped with both installers.
+#
+# Actions tab -> "Build Windows-OS" -> Run workflow. About 10 minutes, then
+# download Windows-OS-Mac or Windows-OS-Windows at the bottom of the run's
+# page.
+name: Build Windows-OS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  private-only:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that this copy is private
+        if: ${{ !github.event.repository.private }}
+        run: |
+          echo "::error::Ce dépôt est public. Crée une copie PRIVÉE (bouton « Use this template » > Private) et lance la compilation dedans."
+          exit 1
+
+  build:
+    needs: private-only
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the NumWorks SDK (Linux)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential git imagemagick libfreetype6-dev \
+            libjpeg-dev libpng-dev pkg-config python3-venv zip \
+            gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+          arm-none-eabi-gcc --version | head -1
+          make --version | head -1
+      - name: Download Epsilon, apply the Windows-OS patch, compile
+        run: ./scripts/build-firmware.sh
+      - name: Package the installers (Mac and Windows)
+        run: |
+          set -e
+          common() {
+            mkdir -p "$1"
+            cp -R installer/firmware installer/numworks installer/games "$1/"
+            cp installer/server.py installer/dfu_launch.py installer/link_games.py \
+               installer/index.html "$1/"
+            rm -rf "$1/__pycache__" "$1/games/.gitkeep"
+          }
+          common dist/Windows-OS-Mac/Windows-OS
+          cp "installer/Installer Windows-OS.command" docs/LISEZMOI.txt dist/Windows-OS-Mac/Windows-OS/
+          chmod +x "dist/Windows-OS-Mac/Windows-OS/Installer Windows-OS.command" \
+                   dist/Windows-OS-Mac/Windows-OS/*.py
+          # A zip keeps the executable bit of the .command file on the Mac
+          (cd dist/Windows-OS-Mac && zip -qr ../Windows-OS-Mac.zip Windows-OS)
+          common dist/Windows-OS-Windows/Windows-OS
+          cp "installer/Installer Windows-OS.bat" dist/Windows-OS-Windows/Windows-OS/
+          cp docs/LISEZMOI-Windows.txt dist/Windows-OS-Windows/Windows-OS/LISEZMOI.txt
+          ls -la dist dist/Windows-OS-Windows/Windows-OS dist/Windows-OS-Windows/Windows-OS/games
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-OS-Mac
+          retention-days: 7
+          path: dist/Windows-OS-Mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-OS-Windows
+          retention-days: 7
+          path: dist/Windows-OS-Windows
