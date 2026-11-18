@@ -109,7 +109,7 @@ NumWorks, dans ton compte GitHub ou sur ton Mac.
    privée (*Add file* > *Upload files*). Ils seront préparés et inclus dans
    l'installateur.
 3. Dans ta copie : onglet **Actions** > **Build Windows-OS** > **Run workflow**.
-4. Environ 10 minutes plus tard, en bas de la page de la compilation,
+4. Environ 15 minutes plus tard, en bas de la page de la compilation,
    télécharge **Windows-OS-Mac** ou **Windows-OS-Windows** et décompresse-le
    (deux fois pour la version Mac : GitHub met le zip dans un zip).
 
@@ -136,15 +136,17 @@ compile, prépare les jeux de `games/` et remplit le dossier `installer/`.
    clic droit > **Ouvrir**). La page de l'installateur s'ouvre
    (http://127.0.0.1:8767).
 
-**Sur Windows**
+**Sur Windows** (rien à installer : ni Python, ni pilote)
 
-1. Une seule fois : installe [Python 3](https://www.python.org/downloads/) en
-   cochant **Add python.exe to PATH**. Aucun pilote à installer : la
-   calculatrice se déclare comme périphérique WinUSB.
-2. Double-clique sur **`Installer Windows-OS.bat`** (si SmartScreen
-   s'affiche : *Informations complémentaires* > *Exécuter quand même*). Il
-   installe libusb pour Python la première fois, puis ouvre la page de
-   l'installateur.
+1. Décompresse **Windows-OS-Windows** (clic droit > *Extraire tout*) : ne
+   lance pas l'installateur depuis l'intérieur du zip.
+2. Dans le dossier `Windows-OS`, double-clique sur
+   **`Installer Windows-OS.exe`** (si SmartScreen s'affiche :
+   *Informations complémentaires* > *Exécuter quand même*). Une fenêtre noire
+   s'ouvre avec la page de l'installateur dans ton navigateur : laisse-la
+   ouverte, et ferme-la à la fin pour quitter. Comme pour NumSocial, l'`.exe`
+   contient Python et libusb, et la calculatrice se déclare comme
+   périphérique WinUSB : Windows la reconnaît sans pilote.
 
 **Ensuite, sur les deux**
 
@@ -158,7 +160,7 @@ compile, prépare les jeux de `games/` et remplit le dossier `installer/`.
 L'installateur vérifie que le **slot B** est libre avant d'écrire : le système
 officiel (slot A) n'est jamais modifié. Il place les jeux juste après
 Windows-OS dans le slot B (l'adresse est lue dans le firmware compilé), les
-copie, les relit pour les vérifier quand `dfu-util` est présent, puis installe
+copie, les relit pour les vérifier, puis installe
 Windows-OS et le démarre.
 
 ## À savoir
@@ -194,9 +196,10 @@ Windows-OS et le démarre.
 | `apps/home/win/gen_icons.py` (dans le patch) | génère les icônes (`win_icons.h`) |
 | `scripts/build-firmware.sh` | télécharge Epsilon, applique le patch, compile, prépare les jeux et l'installateur |
 | `installer/server.py` | serveur local (127.0.0.1 uniquement) de l'installateur, Mac et Windows |
-| `installer/dfu_launch.py` | lance l'outil DFU de NumWorks avec libusb (Homebrew ou `libusb-package`) |
+| `installer/dfu_launch.py` | lance l'outil DFU de NumWorks avec libusb (Homebrew ou `libusb-package`) et les correctifs Windows de NumSocial |
+| `scripts/build-windows-installer.py` | fait `Installer Windows-OS.exe` avec PyInstaller (sur Windows, dans le workflow) et le teste |
 | `installer/link_games.py` | place chaque jeu `.nwa` à son adresse dans le slot B, comme le site de NumWorks |
-| `installer/Installer Windows-OS.command` / `.bat` | lanceurs en double-clic pour Mac / Windows |
+| `installer/Installer Windows-OS.command` | lanceur en double-clic pour Mac |
 | `.github/workflows/build.yml` | compilation dans ta copie privée, avec les deux installateurs |
 
 ## Licence

@@ -7,10 +7,14 @@ flashing, it checks that slot B is the inactive slot (i.e. that the
 calculator is running its official software from slot A).
 
 Usage: server.py [--port 8767] [--no-browser]
+       server.py --self-test        (checks the installer, used by the build)
 
-Needs Python 3 and libusb:
-  - macOS:   brew install libusb   (dfu-util is used too when present)
-  - Windows: python -m pip install libusb-package   (done by the .bat file)
+  - macOS: Python 3 and libusb (brew install libusb; dfu-util is used too when
+    present), started by "Installer Windows-OS.command".
+  - Windows: "Installer Windows-OS.exe", this file built with PyInstaller by
+    the GitHub workflow (Python, pyusb and libusb inside, nothing to install).
+    The .exe also runs NumWorks' dfu.py (--dfu ...) and link_games.py
+    (--link-games ...) when the installer starts it as a separate process.
 Adding new games needs the Arm GNU toolchain (arm-none-eabi-gcc); the games
 already in games/ when the installer was built are pre-linked and need
 nothing.
@@ -31,11 +35,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-HERE = Path(__file__).resolve().parent
+OS_NAME = "Windows-OS"
+FIRMWARE_NAME = "windows-os"
+DEFAULT_PORT = 8767  # PSP-OS 8765, Switch-OS 8766, Windows-OS 8767
+
+FROZEN = getattr(sys, "frozen", False)  # the Windows .exe (PyInstaller)
+HERE = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 DFU_LAUNCH = HERE / "dfu_launch.py"  # NumWorks' dfu.py, with libusb found
 LINK_GAMES = HERE / "link_games.py"
-FIRMWARE_DFU = HERE / "firmware" / "windows-os.B.dfu"
-FIRMWARE_ELF = HERE / "firmware" / "windows-os.B.elf"
+FIRMWARE_DFU = HERE / "firmware" / f"{FIRMWARE_NAME}.B.dfu"
+FIRMWARE_ELF = HERE / "firmware" / f"{FIRMWARE_NAME}.B.elf"
 PREBUILT_GAMES = HERE / "firmware" / "games.bin"
 PREBUILT_LIST = HERE / "firmware" / "games.json"
 GAMES_DIR = HERE / "games"
@@ -43,6 +52,8 @@ PAGE = HERE / "index.html"
 
 PYTHON = sys.executable
 WINDOWS = os.name == "nt"
+if not FROZEN:
+    sys.path.insert(0, str(HERE))  # link_games.py, dfu_launch.py
 
 
 def find_dfu_util():
@@ -66,7 +77,6 @@ MAX_UPLOAD = 4 * 1024 * 1024
 def apps_area():
     """(start, end) of the external apps area of the built firmware: it
     starts right after the userland, so it moves when the userland grows."""
-    sys.path.insert(0, str(HERE))
     import link_games
     sym = link_games.symbols(FIRMWARE_ELF)
     start = sym["_external_apps_flash_start"]
@@ -82,13 +92,30 @@ def run(cmd, timeout=600):
     kwargs = {}
     if WINDOWS:
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
-    p = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True,
-                       timeout=timeout, **kwargs)
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    try:
+        p = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=env,
+                           timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired:
+        return 1, "Délai dépassé : " + " ".join(str(c) for c in cmd[1:3])
+    except OSError as e:
+        return 1, f"Impossible de lancer {cmd[0]} : {e}"
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
 def dfu(*args, timeout=600):
+    """Runs NumWorks' dfu.py in its own process: the calculator is released
+    when it ends (on Windows, one program at a time can open it)."""
+    if FROZEN:
+        return run([sys.executable, "--dfu", *args], timeout=timeout)
     return run([PYTHON, str(DFU_LAUNCH), *args], timeout=timeout)
+
+
+def link_games_cmd(*args):
+    if FROZEN:
+        return [sys.executable, "--link-games", *args]
+    return [PYTHON, str(LINK_GAMES), *args]
 
 
 def dfu_query(flag):
@@ -99,12 +126,27 @@ def dfu_query(flag):
     return lines[-1]
 
 
-def calculator_status():
-    model = dfu_query("--model")
-    if model is None:
-        return {"connected": False}
-    slot = dfu_query("--inactive_slot")
-    return {"connected": True, "model": model, "inactiveSlot": slot}
+STATUS_LOCK = threading.Lock()
+LAST_STATUS = {"connected": False}
+
+
+def calculator_status(wait=False):
+    """One look at the calculator at a time: two programs opening it at once
+    fail on Windows (the page polls the status every few seconds)."""
+    global LAST_STATUS
+    if not STATUS_LOCK.acquire(blocking=wait):
+        return dict(LAST_STATUS)
+    try:
+        model = dfu_query("--model")
+        if model is None:
+            status = {"connected": False}
+        else:
+            slot = dfu_query("--inactive_slot")
+            status = {"connected": True, "model": model, "inactiveSlot": slot}
+        LAST_STATUS = status
+        return dict(status)
+    finally:
+        STATUS_LOCK.release()
 
 
 def elf_section(path, wanted):
@@ -157,7 +199,7 @@ def prebuilt_matches():
     if not PREBUILT_GAMES.exists() or not PREBUILT_LIST.exists():
         return False
     try:
-        listed = json.loads(PREBUILT_LIST.read_text())
+        listed = json.loads(PREBUILT_LIST.read_text(encoding="utf-8"))
         expected = sorted((g["name"].lower(), g["sha1"]) for g in listed["games"])
     except (OSError, ValueError, KeyError, TypeError):
         return False
@@ -165,7 +207,6 @@ def prebuilt_matches():
 
 
 def have_toolchain():
-    sys.path.insert(0, str(HERE))
     try:
         import link_games
         link_games.tool("arm-none-eabi-gcc")
@@ -234,8 +275,7 @@ def prepare_games(image):
     if games and not have_toolchain():
         return ("Pour ajouter de nouveaux jeux, installe la chaîne ARM "
                 "(Arm GNU Toolchain, arm-none-eabi) ou retire les jeux ajoutés.")
-    code, out = run([PYTHON, str(LINK_GAMES), str(FIRMWARE_ELF),
-                     str(GAMES_DIR), image])
+    code, out = run(link_games_cmd(str(FIRMWARE_ELF), str(GAMES_DIR), image))
     JOB.write("\n".join(l for l in out.splitlines() if "RWX" not in l))
     if code != 0:
         return "Impossible de préparer les jeux (voir le journal)."
@@ -245,18 +285,18 @@ def prepare_games(image):
 def install():
     try:
         JOB.step("Recherche de la calculatrice")
-        status = calculator_status()
+        status = calculator_status(wait=True)
         if not status["connected"]:
             return JOB.fail("Calculatrice introuvable. Branche-la en USB, "
                             "appuie sur Reset (au dos) et attends le menu officiel.")
         JOB.write(f"Modèle: {status['model']}, slot inactif: {status['inactiveSlot']}")
         if status["model"] != "n0120":
-            return JOB.fail(f"Modèle {status['model']} non supporté (Windows-OS est fait pour la n0120).")
+            return JOB.fail(f"Modèle {status['model']} non supporté ({OS_NAME} est fait pour la n0120).")
         if status["inactiveSlot"] != "B":
             return JOB.fail("La calculatrice tourne sur le slot B. Appuie sur Reset au dos "
                             "pour revenir sur le système officiel (slot A), puis réessaie.")
         if not FIRMWARE_DFU.exists() or not FIRMWARE_ELF.exists():
-            return JOB.fail("Firmware Windows-OS introuvable dans firmware/ : "
+            return JOB.fail(f"Firmware {OS_NAME} introuvable dans firmware/ : "
                             "compile-le d'abord (voir le README).")
 
         JOB.step("Préparation des jeux")
@@ -280,27 +320,32 @@ def install():
                 return JOB.fail("Échec de l'écriture des jeux.")
 
             JOB.step("Vérification des jeux")
+            back = os.path.join(tmp, "readback.bin")
             if DFU_UTIL:
-                back = os.path.join(tmp, "readback.bin")
                 code, out = run([DFU_UTIL, "-a", "0", "-s", f"{hex(apps_start)}:{size}",
                                  "-U", back])
-                if code != 0 or Path(back).read_bytes() != Path(image).read_bytes():
-                    JOB.write(out)
-                    return JOB.fail("Les jeux relus ne correspondent pas à ce qui a été écrit.")
-                JOB.write("Jeux vérifiés : identiques.")
             else:
-                JOB.write("Relecture sautée (dfu-util absent) : l'outil de NumWorks "
-                          "contrôle l'état de chaque bloc pendant l'écriture.")
+                code, out = dfu("--upload", f"{hex(apps_start)}:{size}", back)
+            if code != 0 or not os.path.exists(back):
+                # Reading back is a bonus check: the writing itself already
+                # checks the state of every block.
+                JOB.write(out)
+                JOB.write("Relecture impossible, vérification sautée "
+                          "(l'écriture a contrôlé chaque bloc).")
+            elif Path(back).read_bytes() != Path(image).read_bytes():
+                return JOB.fail("Les jeux relus ne correspondent pas à ce qui a été écrit.")
+            else:
+                JOB.write("Jeux vérifiés : identiques.")
 
-        JOB.step("Installation de Windows-OS (slot B)")
+        JOB.step(f"Installation de {OS_NAME} (slot B)")
         if dfu_query("--inactive_slot") != "B":
             return JOB.fail("Le slot B n'est plus le slot inactif, installation annulée.")
         code, out = dfu("-s", f"{hex(USERLAND_B)}:leave", "-D", str(FIRMWARE_DFU))
         JOB.write(out)
         if code != 0:
-            return JOB.fail("Échec de l’écriture de Windows-OS.")
+            return JOB.fail(f"Échec de l'écriture de {OS_NAME}.")
 
-        JOB.step("Windows-OS démarre sur la calculatrice", "done")
+        JOB.step(f"{OS_NAME} démarre sur la calculatrice", "done")
         with JOB.lock:
             JOB.result = "ok"
             JOB.running = False
@@ -403,32 +448,107 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "not found"}, 404)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8767)
-    parser.add_argument("--no-browser", action="store_true")
-    args = parser.parse_args()
-    GAMES_DIR.mkdir(exist_ok=True)
-    # 8765 / 8766 are the PSP-OS / Switch-OS installers: use another port,
-    # and the next free one if this one is already taken.
-    server = None
-    for port in range(args.port, args.port + 20):
+class Server(ThreadingHTTPServer):
+    # On Windows, SO_REUSEADDR lets a second program take a port that is
+    # already in use: keep it off there, so a busy port is really skipped.
+    allow_reuse_address = not WINDOWS
+    daemon_threads = True
+
+
+def open_server(first_port):
+    """The first free port from first_port (8765 / 8766 / 8767 are PSP-OS,
+    Switch-OS and Windows-OS: each installer can run next to the others)."""
+    for port in range(first_port, first_port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-            break
+            return Server(("127.0.0.1", port), Handler), port
         except OSError:
             continue
-    if server is None:
-        raise SystemExit("Aucun port libre pour l'installateur.")
+    raise SystemExit("Aucun port libre pour l'installateur.")
+
+
+def self_test():
+    """Checks that everything the installer needs is there and works, without
+    a calculator. Run by the GitHub workflow on the Windows .exe."""
+    import urllib.request
+
+    import dfu_launch
+
+    problems = []
+    for path in (FIRMWARE_DFU, FIRMWARE_ELF, PAGE):
+        print(("ok  " if path.exists() else "MANQUE  ") + str(path.relative_to(HERE)))
+        if not path.exists():
+            problems.append(str(path))
+    print("libusb :", dfu_launch.libusb_path())
+    if WINDOWS and dfu_launch.libusb_path() is None:
+        problems.append("libusb (DLL de libusb-package)")
+    dfu_module = dfu_launch.load_dfu()
+    print("dfu.py :", dfu_module.__name__)
+    import usb.core
+    try:  # (a build machine may have no USB at all: not an error)
+        devices = list(usb.core.find(find_all=True, idVendor=0x0483) or [])
+        print("USB ok, appareils NumWorks/STM :", len(devices))
+    except Exception as e:
+        print("USB indisponible ici :", type(e).__name__, e)
+    start, end = apps_area()
+    print(f"Zone des jeux : {start:#x}..{end:#x}")
+    games = list(GAMES_DIR.glob("*.nwa"))
+    print("Jeux :", len(games), "| préparés :", prebuilt_matches() if games else "-")
+    if games and not prebuilt_matches():
+        problems.append("games.bin ne correspond pas aux jeux")
+    code, out = dfu("--list", timeout=60)
+    print("dfu.py --list (processus séparé) :", code, out.strip()[-300:])
+    if any(word in out for word in ("ModuleNotFoundError", "ImportError", "No module named",
+                                    "Impossible de lancer")):
+        problems.append("dfu.py --list")
+    server, port = open_server(DEFAULT_PORT)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=60) as r:
+        status = json.loads(r.read())
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=60) as r:
+        page_ok = OS_NAME.encode() in r.read()
+    server.shutdown()
+    print("Page :", "ok" if page_ok else "ERREUR", "| /api/status :", status)
+    if not page_ok or status.get("firmware") is not True:
+        problems.append("serveur")
+    if problems:
+        print("ÉCHEC :", ", ".join(problems))
+        return 1
+    print("Auto-test OK")
+    return 0
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--dfu":
+        import dfu_launch
+        return dfu_launch.main(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "--link-games":
+        import link_games
+        return link_games.main(sys.argv[2:])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if args.self_test:
+        return self_test()
+    GAMES_DIR.mkdir(exist_ok=True)
+    server, port = open_server(args.port)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Windows-OS Installer: {url}  (Ctrl+C pour quitter)")
+    print(f"Installateur {OS_NAME} : {url}")
+    print("Laisse cette fenêtre ouverte pendant l'installation ; ferme-la pour quitter.")
     if not args.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

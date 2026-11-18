@@ -114,4 +114,5 @@ fi
 
 say "Windows-OS est prêt dans installer/."
 echo "Mac : double-clique sur « installer/Installer Windows-OS.command » (ou : python3 installer/server.py)."
-echo "Windows : copie le dossier installer/ sur le PC et double-clique sur « Installer Windows-OS.bat »."
+echo "Windows : l'installateur .exe se fait sur un PC Windows avec scripts/build-windows-installer.py,"
+echo "          ou dans ta copie privée sur GitHub (Actions > Build Windows-OS)."

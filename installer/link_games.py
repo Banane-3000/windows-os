@@ -23,7 +23,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+import sys
+
+# Next to the .exe in the Windows installer (PyInstaller), else next to this file
+HERE = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent)
 SECTOR = 0x10000  # Config::ExternalAppsSectorUnit on n0120
 TRAMPOLINE = 0x0807FC00  # TrampolineOrigin (bootloader, internal flash)
 CPU = ["-mcpu=cortex-m7", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv5-d16"]
@@ -90,13 +94,13 @@ def linker_script(template, flash_start, flash_length, ram_start, ram_length):
     return ld
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("userland_elf")
     parser.add_argument("games_dir")
     parser.add_argument("out_bin")
     parser.add_argument("--eadk", default=str(HERE / "numworks" / "eadk"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     games = sorted(Path(args.games_dir).glob("*.nwa"), key=lambda p: p.name.lower())
     image = bytearray()
@@ -107,14 +111,14 @@ def main():
         ram_start = (sym["_external_apps_RAM_start"] + 7) & ~7
         ram_end = sym["_external_apps_RAM_end"]
         eadk_obj = os.path.join(args.eadk, "eadk.o")
-        template = Path(args.eadk, "linker.ld").read_text()
+        template = Path(args.eadk, "linker.ld").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             for game in games:
                 address = area_start + len(image)
                 ld_path = os.path.join(tmp, "app.ld")
                 Path(ld_path).write_text(linker_script(
                     template, address, area_end - address, ram_start,
-                    ram_end - ram_start))
+                    ram_end - ram_start), encoding="utf-8")
                 elf = os.path.join(tmp, "app.elf")
                 binary = os.path.join(tmp, "app.bin")
                 subprocess.run([tool("arm-none-eabi-gcc"), *CPU, "-nostartfiles",
