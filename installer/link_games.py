@@ -120,7 +120,7 @@ def main():
                 subprocess.run([tool("arm-none-eabi-gcc"), *CPU, "-nostartfiles",
                                 "-nostdlib", "-T", ld_path, "-Wl,--gc-sections",
                                 "-Wl,-e,_start", "-Wl,--no-warn-rwx-segments",
-                                str(game), eadk_obj, "-lgcc", "-o", elf],
+                                str(game), eadk_obj, "-lgcc", "-lc", "-lgcc", "-o", elf],
                                check=True)
                 subprocess.run([tool("arm-none-eabi-objcopy"), "-O", "binary",
                                 elf, binary], check=True)

@@ -76,7 +76,7 @@ cp -R "$SRC/epsilon/tools/device/usb" "$OUT/numworks/usb"
 # EADK runtime for the games, as one relocatable object + its linker script
 EADK="$SRC/epsilon/eadk"
 TMP="$(mktemp -d)"
-CPU="-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -DPLATFORM_DEVICE=1 -ffunction-sections -fdata-sections"
+CPU="-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -fno-tree-loop-distribute-patterns -DPLATFORM_DEVICE=1 -ffunction-sections -fdata-sections"
 INC="-I$EADK/include -I$SRC/shared -I$SRC/shared/ion/src/device"
 # shellcheck disable=SC2086
 arm-none-eabi-gcc $CPU $INC -c "$EADK/src/platform.c" -o "$TMP/platform.o"
