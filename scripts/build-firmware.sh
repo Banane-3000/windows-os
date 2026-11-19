@@ -24,7 +24,7 @@ SRC="$ROOT/firmware"
 VENV="$ROOT/.venv"
 OUT="$ROOT/installer"
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-MODEL=n0120
+MODEL="${MODEL:-n0120}"   # n0120 (défaut) ou n0110 : MODEL=n0110 ./scripts/build-firmware.sh
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
