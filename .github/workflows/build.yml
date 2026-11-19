@@ -17,6 +17,14 @@ name: Build Windows-OS
 
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: "Modèle de calculatrice"
+        type: choice
+        options:
+          - n0110
+          - n0120
+        default: n0110
 
 jobs:
   private-only:
@@ -43,6 +51,8 @@ jobs:
           arm-none-eabi-gcc --version | head -1
           make --version | head -1
       - name: Download Epsilon, apply the Windows-OS patch, compile
+        env:
+          MODEL: ${{ inputs.model }}
         run: ./scripts/build-firmware.sh
       - name: Package the Mac installer
         run: |
