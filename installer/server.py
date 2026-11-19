@@ -290,8 +290,8 @@ def install():
             return JOB.fail("Calculatrice introuvable. Branche-la en USB, "
                             "appuie sur Reset (au dos) et attends le menu officiel.")
         JOB.write(f"Modèle: {status['model']}, slot inactif: {status['inactiveSlot']}")
-        if status["model"] != "n0120":
-            return JOB.fail(f"Modèle {status['model']} non supporté ({OS_NAME} est fait pour la n0120).")
+        if status["model"] not in ("n0110", "n0120"):
+            return JOB.fail(f"Modèle {status['model']} non supporté ({OS_NAME} est fait pour la n0110 et la n0120).")
         if status["inactiveSlot"] != "B":
             return JOB.fail("La calculatrice tourne sur le slot B. Appuie sur Reset au dos "
                             "pour revenir sur le système officiel (slot A), puis réessaie.")
